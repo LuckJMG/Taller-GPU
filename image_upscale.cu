@@ -12,19 +12,18 @@ __global__ void kernel(unsigned char* d_img, int width, int height, int channels
 
     if (x < width && y < height) {
         int idx = (y * width + x) * channels;
-		int idx_out = (height*width - 1 - (y*width + x)) * channels;
+		int idx_tl = (2*y * width + 2*x) * channels;
+		int idx_tr = (2*y * width + 2*x + 1) * channels;
+		int idx_bl = ((2*y + 1) * width + 2*x) * channels;
+		int idx_br = ((2*y + 1) * width + 2*x + 1) * channels;
 
-        out_img[idx_out + 0] = d_img[idx + 0]; // R
-        out_img[idx_out + 1] = d_img[idx + 1]; // G
-        out_img[idx_out + 2] = d_img[idx + 2]; // B
+		for (int c = 0; c < channels; c++) {
+			out_img[idx_tl + c] = d_img[idx + c];
+			out_img[idx_tr + c] = d_img[idx + c];
+			out_img[idx_bl + c] = d_img[idx + c];
+			out_img[idx_br + c] = d_img[idx + c];
+		}
     }
-}
-
-void printVector(int* vec, int size) {
-	for (int i=0; i<size; i++) {
-		printf("%d ", vec[i]);
-	}
-	printf("\n");
 }
 
 int main(int argc, char **argv){
@@ -42,20 +41,18 @@ int main(int argc, char **argv){
 	dim3 grid((width + block.x - 1) / block.x, (height + block.y - 1) / block.y);
 	printf("Grid: %d x %d, Block: %d x %d\n", grid.x, grid.y, block.x, block.y);
 
-
 	// Inicializar valores
 	size_t size = width * height * channels * sizeof(unsigned char);
 	unsigned char* d_img = NULL;
-	unsigned char* out_img = NULL;
+	unsigned char* d_out_img = NULL;
 
 	// Asignar memoria en GPU
 	cudaMalloc((void**)&d_img, size);
-	cudaMalloc((void**)&out_img, size);
+	cudaMalloc((void**)&d_out_img, 4*size);
 	cudaMemcpy(d_img, img, size, cudaMemcpyHostToDevice);  // Copiar imagen a GPU
 
-
 	// Procesar imagen
-	kernel<<<grid, block>>>(d_img, width, height, channels, out_img);
+	kernel<<<grid, block>>>(d_img, width, height, channels, d_out_img);
 	cudaDeviceSynchronize();
 	err = cudaGetLastError();
 	if (err != cudaSuccess) {
@@ -63,18 +60,20 @@ int main(int argc, char **argv){
 		exit(EXIT_FAILURE);
 	}
 
-	cudaMemcpy(img, out_img, size, cudaMemcpyDeviceToHost);  // Copiar imagen procesada de la GPU
+	unsigned char* out_img = (unsigned char*)malloc(4*size);
+	cudaMemcpy(out_img, d_out_img, 4*size, cudaMemcpyDeviceToHost);  // Copiar imagen procesada de la GPU
 
 	// Guardar imagen procesada
-	if (!stbi_write_png("inverted.jpg", width, height, channels, img, width * channels)) {
-		printf("Error at saving inverted.jpg\n");
+	if (!stbi_write_png("processed.jpg", 2*width, 2*height, channels, out_img, 2*width * channels)) {
+		printf("Error at saving processed.jpg\n");
 	} else {
-		printf("Inverted image saved at inverted.jpg\n");
+		printf("Inverted image saved at processed.jpg\n");
 	}
 
 	// Limpiar memoria
 	cudaFree(d_img);
 	stbi_image_free(img);
+	delete d_out_img;
 
 	return 0;
 }
